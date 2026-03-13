@@ -1,67 +1,44 @@
 #!/bin/bash
 
-# Enable debug output
-set -x
 set -e
 
-echo "=========================================="
-echo "STARTING NEPAL VOTING DEPLOYMENT"
-echo "=========================================="
+echo "Starting Nepal Voting App..."
 
-# Get script directory
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-cd "$SCRIPT_DIR"
+# Navigate to the app directory (Oryx extracts to /tmp/xxx and sets app path)
+# The ORYX_APP_PATH or default to current working directory
+APP_PATH="${ORYX_APP_PATH:-.}"
 
-echo "[LOG] Working Directory: $PWD"
-echo "[LOG] Python Version: $(python --version 2>&1)"
-echo "[LOG] Pip Version: $(pip --version 2>&1)"
-echo "[LOG] User: $(whoami)"
+cd "$APP_PATH"
 
-# Check if files exist
-echo "[CHECK] Looking for manage.py..."
-if [ -f manage.py ]; then
-    echo "[OK] manage.py found"
-else
-    echo "[ERROR] manage.py NOT found!"
-    ls -la
-    exit 1
+# If in Oryx temp directory, look for nepal_voting subdirectory
+if [ ! -f "manage.py" ] && [ -d "nepal_voting" ]; then
+    cd nepal_voting
+    echo "Found nepal_voting subdirectory, switched to it"
 fi
 
-echo "[CHECK] Looking for requirements.txt..."
-if [ -f requirements.txt ]; then
-    echo "[OK] requirements.txt found"
-else
-    echo "[WARN] requirements.txt NOT found - will try to continue"
-fi
+echo "Current directory: $(pwd)"
+echo "Contents: $(ls -la)"
 
-# Install dependencies
-echo "[STEP] Installing dependencies..."
-pip install --upgrade pip 2>&1 || echo "[WARN] pip upgrade failed"
-pip install -r requirements.txt 2>&1 || echo "[WARN] requirements install had issues"
+# Install/upgrade packages
+echo "Installing requirements..."
+pip install --upgrade pip
+pip install -r requirements.txt
 
-# Try to import Django
-echo "[CHECK] Testing Django import..."
-python -c "import django; print('Django version:', django.VERSION)" || exit 1
+# Collect static files
+echo "Collecting static files..."
+python manage.py collectstatic --noinput || true
 
-# Run migrations (don't fail if this errors)
-echo "[STEP] Running migrations..."
-python manage.py migrate --noinput 2>&1 || echo "[WARN] Migrations completed with warnings"
+# Run migrations
+echo "Running migrations..."
+python manage.py migrate --noinput || true
 
-# Collect static (don't fail if this errors)
-echo "[STEP] Collecting static files..."
-python manage.py collectstatic --noinput 2>&1 || echo "[WARN] Static collection had issues"
-
-echo "=========================================="
-echo "STARTING GUNICORN SERVER"
-echo "=========================================="
-
-# Start gunicorn with maximum debug output
-exec python -m gunicorn \
-  --workers 1 \
+# Start gunicorn
+echo "Starting gunicorn on port 8000..."
+exec gunicorn \
+  --workers 3 \
   --worker-class sync \
   --bind 0.0.0.0:8000 \
   --timeout 120 \
   --access-logfile - \
   --error-logfile - \
-  --log-level debug \
   nepal_voting.wsgi:application
